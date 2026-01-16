@@ -11,6 +11,8 @@ func main() {
 
 	validation.Init(cfg.Lang)
 
-	r := router.Setup()
-	r.Run(":8080")
+	r := router.Setup(&cfg)
+	// pointer olarak gonderdik cunku config yapisi buyuk olabilir. Yani cfg.Lang gibi kullanmak yerine, pointer ile gonderip, icinde istedigimiz yere erisebiliriz.
+
+	r.Run(":" + cfg.Port)
 }
