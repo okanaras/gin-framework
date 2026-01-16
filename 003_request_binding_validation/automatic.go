@@ -2,15 +2,32 @@ package main
 
 import (
 	"errors"
+	"log"
 	"net/http"
+	"os"
 	"reflect"
 	"strings"
 
 	"github.com/gin-gonic/gin"
+	"github.com/gin-gonic/gin/binding"
+	"github.com/go-playground/locales/en"
+	"github.com/go-playground/locales/ru"
+	"github.com/go-playground/locales/tr"
+	ut "github.com/go-playground/universal-translator"
 	"github.com/go-playground/validator/v10"
+	enTranslations "github.com/go-playground/validator/v10/translations/en"
+	ruTranslations "github.com/go-playground/validator/v10/translations/ru"
+	trTranslations "github.com/go-playground/validator/v10/translations/tr"
 )
 
+var translator ut.Translator
+
 func main() {
+
+	cfg := loadConfig()
+
+	initValidator(cfg)
+
 	r := gin.Default()
 
 	r.POST("/users", createUserHandler)
@@ -46,6 +63,83 @@ type CreateUserRequest struct {
 	Age   int    `json:"age" binding:"required"`
 }
 
+type Config struct {
+	Lang string // "tr", "en", "ru"
+}
+
+func loadConfig() Config {
+	lang := strings.TrimSpace(strings.ToLower(os.Getenv("APP_LANG"))) // "tr", "en", "ru"
+	if lang == "" {
+		lang = "en"
+	}
+
+	switch lang {
+	case "tr", "en", "ru":
+		// bunlardan biri gelirse, aynen kullan
+	default:
+		lang = "en"
+	}
+
+	return Config{Lang: lang}
+}
+
+func initValidator(cfg Config) *validator.Validate {
+	// Override default validator engine
+	v, ok := binding.Validator.Engine().(*validator.Validate)
+	if !ok {
+		panic("Validator engine is not found")
+	}
+
+	// tag alanlarini register et
+	v.RegisterTagNameFunc(func(fld reflect.StructField) string {
+		// json tag'ini al
+		tag := fld.Tag.Get("json")
+
+		if tag == "" {
+			return fld.Name
+		}
+
+		// json tag varsa, virgule kadar olan kismi al
+		name := strings.Split(tag, ",")[0]
+		if name == "-" || name == "" {
+			return fld.Name
+		}
+
+		return name
+	})
+
+	// Translator init
+	trLocale := tr.New()
+	enLocale := en.New()
+	ruLocale := ru.New()
+
+	// fallback locale: en, supported locales: tr, ru
+	uni := ut.New(enLocale, trLocale, enLocale, ruLocale)
+
+	var found bool
+	translator, found = uni.GetTranslator(cfg.Lang)
+
+	if !found {
+		translator, _ = uni.GetTranslator("en")
+	}
+
+	var err error
+	switch cfg.Lang {
+	case "tr":
+		err = trTranslations.RegisterDefaultTranslations(v, translator)
+	case "ru":
+		err = ruTranslations.RegisterDefaultTranslations(v, translator)
+	default: // "en" veya diğer durumlar için varsayılan İngilizce
+		err = enTranslations.RegisterDefaultTranslations(v, translator)
+	}
+
+	if err != nil {
+		log.Printf("Error registering translations: %v", err)
+	}
+
+	return v
+}
+
 func createUserHandler(c *gin.Context) {
 	var req CreateUserRequest // Request DTO instance
 
@@ -60,7 +154,7 @@ func createUserHandler(c *gin.Context) {
 
 			c.JSON(http.StatusUnprocessableEntity, APIErrorResponse{
 				Message: "Validation Failed",
-				Errors:  mapValidationErrors(CreateUserRequest{}, ve),
+				Errors:  mapValidationErrors(ve),
 			})
 			return
 		}
@@ -93,80 +187,16 @@ func createUserHandler(c *gin.Context) {
 	})
 }
 
-func mapValidationErrors(req any, ve validator.ValidationErrors) map[string][]string {
+func mapValidationErrors(ve validator.ValidationErrors) map[string][]string {
 	out := make(map[string][]string) // ram de map olusturuldu
 
-	reqType := reflect.TypeOf(req)
-
 	for _, fe := range ve {
-		// fe.Field(): hatali alani verir (struct field ismi, örn: "Name, Email, Age")
+		field := fe.Field() // Name, Email, Age
+		msg := fe.Translate(translator)
 
-		// fe.StructField(): direct struct field bilgisini verir. Direkt struct in adina erisir. (orn: Name, Email, Age)
-		field := toJSONFieldName(reqType, fe.StructField())
-
-		out[field] = append(out[field], validationMessage(fe))
+		out[field] = append(out[field], msg)
 	}
 	return out
-}
-
-func toJSONFieldName(reqType reflect.Type, structField string) string {
-	// reflect: Go dilinde runtime'da tip bilgilerine erismek icin kullanilir
-	// reqType pointer ise ornek: &CreateUserRequest{}
-
-	// fe.Kind(): hatali alandaki degerin tipini verir (örn: string, int, struct, ptr vb)
-	if reqType.Kind() == reflect.Ptr {
-		// Elem(): pointer'in gosterdigi tip bilgisini verir
-		reqType = reqType.Elem()
-	}
-
-	if reqType.Kind() == reflect.Struct {
-		return lowerFirst(structField)
-	}
-
-	// reqType.FieldByName: struct field bilgisini verir
-	f, ok := reqType.FieldByName(structField)
-	if !ok {
-		return lowerFirst(structField)
-	}
-
-	// json tag'ini al
-	tag := f.Tag.Get("json")
-	if tag == "" { // json tag yoksa
-		return lowerFirst(structField)
-	}
-
-	// json tag varsa, virgule kadar olan kismi al
-	jsonName := strings.Split(tag, ",")[0]
-	if jsonName == "-" || jsonName == "" {
-		return lowerFirst(structField)
-	}
-
-	return jsonName
-}
-
-func lowerFirst(s string) string {
-	if s == "" {
-		return ""
-	}
-	return strings.ToLower(s[:1]) + s[1:]
-}
-
-func validationMessage(fe validator.FieldError) string {
-	// fe.Tag(): hatali alanda hangi kuralin ihlal edildigini verir (örn: "required", "email", "min" vb)
-	// fe.Param(): kural parametresini verir (örn: min=2 ise "2" degeri)
-
-	switch fe.Tag() {
-	case "required":
-		return "This field is required"
-	case "email":
-		return "Invalid email format"
-	case "min":
-		return "Minimum value is " + fe.Param()
-	case "max":
-		return "Maximum value is " + fe.Param()
-	default:
-		return "Invalid value"
-	}
 }
 
 func pretendDBInsert(req CreateUserRequest) error {
