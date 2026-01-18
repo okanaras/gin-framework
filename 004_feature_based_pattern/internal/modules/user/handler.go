@@ -46,15 +46,26 @@ func CreateUserHandler(c *gin.Context) {
 		return
 	}
 
-	// Basarili response
-	c.JSON(http.StatusCreated, api.APISuccessResponse{
+	format := c.Query("format")
+	response := api.APISuccessResponse{
 		Message: "User Created Successfully",
 		Data: gin.H{
 			"name":  req.Name,
 			"email": req.Email,
 			"age":   req.Age,
 		},
-	})
+	}
+
+	// Basarili response
+	switch format {
+	case "xml":
+		c.XML(http.StatusCreated, response)
+	case "yaml", "yml":
+		c.YAML(http.StatusCreated, response)
+	default:
+		c.JSON(http.StatusCreated, response)
+	}
+
 }
 
 func pretendDBInsert(req CreateUserRequest) error {

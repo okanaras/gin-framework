@@ -3,8 +3,8 @@ package api
 import "github.com/gin-gonic/gin"
 
 type APIErrorResponse struct {
-	Message string              `json:"message"`          // struct tag
-	Errors  map[string][]string `json:"errors,omitempty"` // omitempty: alan boşsa JSON çıktısında yer almaz
+	Message string              `json:"message" xml:"message" yaml:"message"`                            // struct tag
+	Errors  map[string][]string `json:"errors,omitempty" xml:"errors,omitempty" yaml:"errors,omitempty"` // omitempty: alan boşsa JSON, XML veya YAML çıktısında göstermez
 
 	// Example:
 	// {
@@ -17,8 +17,8 @@ type APIErrorResponse struct {
 }
 
 type APISuccessResponse struct {
-	Message string      `json:"messsage"`
-	Data    interface{} `json:"data,omitempty"`
+	Message string      `json:"message" xml:"message" yaml:"message"`
+	Data    interface{} `json:"data,omitempty" xml:"data,omitempty" yaml:"data,omitempty"`
 }
 
 func SendError(ctx *gin.Context, status int, message string, errs map[string][]string) {
