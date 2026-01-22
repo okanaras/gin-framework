@@ -8,3 +8,5 @@
 /.nova
 /.vscode
 /.zed
+mysql_data
+postgres_data
